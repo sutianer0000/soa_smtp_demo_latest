@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+  <h3>Request #{{ req.id }} is <span class="{{ req.status }}">{{ req.status }}</span></h3>
+  <p>{{ req.worker_email }}: {{ req.start_date }} → {{ req.end_date }}</p>
+  <p>Reason: {{ req.reason }}</p>
+  <p>A reply has been sent from your Gmail to {{ req.worker_email }}.</p>
+  <a href="/">Back to home</a>
+{% endblock %}

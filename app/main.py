@@ -1,148 +1,131 @@
-"""The API.  Run:  uvicorn app.main:app --reload
-
-  1. worker   POST /nghiphep           -> PENDING, emails the manager (from the worker)
-  2. manager  clicks Yes / No          -> GET /nghiphep/{id}/decision
-  3.          the answer is saved      -> APPROVED or REJECTED
-  4.          emails the worker (from the manager) and shows a small page
-"""
-import hmac
-import os
 import secrets
-from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
-from pydantic import BaseModel, EmailStr, Field
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.responses import RedirectResponse
+from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, mail, store
+from . import config, db, mailer, oauth
 
-app = FastAPI(title="Absence request demo (SMTP + OAuth 2.0)")
-
-# Signs the login cookie. A random one means everybody is signed out on restart.
-app.add_middleware(SessionMiddleware,
-                   secret_key=os.getenv("SESSION_SECRET") or secrets.token_urlsafe(32))
-app.include_router(auth.router)
-
-DECISION_VALID_HOURS = 48
+app = FastAPI(title="Absence Request Demo")
+app.add_middleware(SessionMiddleware, secret_key=config.SESSION_SECRET)
+templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 
-class AbsenceIn(BaseModel):
-    """Checked by FastAPI before our code runs; bad input answers 422."""
-    manager_email: EmailStr   # the worker is whoever is signed in
-    reason: str = Field(min_length=1, max_length=500)
-    from_date: date
-    to_date: date
+def subject_for(req) -> str:
+    return f"Absence request: {req['start_date']} to {req['end_date']}"
 
 
-def as_json(req):
-    """Listed field by field so the secret token can never leak."""
-    return {
-        "id": req.id,
-        "status": req.status,
-        "employee_email": req.employee_email,
-        "manager_email": req.manager_email,
-        "from_date": req.from_date,
-        "to_date": req.to_date,
-        "reason": req.reason,
-    }
+def current_user(request: Request) -> str | None:
+    """Signed-in email, or None. Storage is in memory, so after a server restart the cookie
+    may still name a user whose tokens are gone: treat that as signed out."""
+    email = request.session.get("email")
+    if email and db.get_user(email) is None:
+        request.session.clear()
+        return None
+    return email
 
 
-def page(title, message, color, status=200):
-    html = mail.templates.get_template("decision_page.html").render(
-        title=title, message=message, color=color)
-    return HTMLResponse(html, status_code=status)
+@app.get("/")
+def home(request: Request):
+    email = current_user(request)
+    if not email:
+        return templates.TemplateResponse(request, "login.html")
+    if email in config.MANAGER_EMAILS:
+        waiting = [r for r in db.requests_to(email) if r["status"] == "PENDING"]
+        return templates.TemplateResponse(request, "manager.html", {"email": email, "waiting": waiting})
+    return templates.TemplateResponse(request, "home.html", {"email": email, "sent": db.requests_from(email)})
 
 
-@app.post("/nghiphep", status_code=201)
-def create_absence(body: AbsenceIn, request: Request):
-    employee = auth.require_user(request)
-    manager = body.manager_email.lower()
+# --- OAuth 2.0 sign-in -------------------------------------------------------
 
-    # Checked before saving or emailing, so a refused request leaves no trace.
-    if employee == manager:
-        raise HTTPException(400, "You cannot be your own manager.")
-    if not store.is_approved(employee, "employees"):
-        raise HTTPException(403, f"{employee} is not on the approved employee list")
-    if not store.is_approved(manager, "managers"):
-        raise HTTPException(403, f"{manager} is not on the approved manager list")
-
-    req = store.add(employee, manager, body.reason, str(body.from_date), str(body.to_date))
-    try:
-        mail.send_request_to_manager(req, auth.token_for(employee))
-    except mail.MailError as error:
-        store.remove(req.id)   # without the email nobody could answer it
-        raise HTTPException(502, str(error))
-    return {"id": req.id, "status": req.status,
-            "message": f"Email with Yes / No buttons sent to {req.manager_email}."}
+@app.get("/login")
+def login(request: Request, next: str = "/", hint: str | None = None):
+    state = secrets.token_urlsafe(16)
+    request.session["oauth_state"] = state 
+    # Only local paths, so /login can't be abused as an open redirect.
+    request.session["next"] = next if next.startswith("/") and not next.startswith("//") else "/"
+    return RedirectResponse(oauth.authorization_url(state, hint))
+#https://accounts.google.com/o/oauth2/v2/auth?client_id=433628379878-nje0e4smj3t62kt9q3s6so7rjkp72erv.apps.googleusercontent.com&redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fauth%2Fcallback&response_type=code&scope=openid+email+https%3A%2F%2Fmail.google.com%2F&access_type=offline&prompt=consent+select_account&state=pX3kQ9vT_2mLr8YwZ1aB0g
 
 
-@app.get("/nghiphep/{request_id}/decision", response_class=HTMLResponse)
-def decide(request_id: int, answer: str, token: str, request: Request):
-    req = store.get(request_id)
-
-    # One answer for all three: telling them apart would help somebody guessing.
-    # compare_digest takes constant time, so the token cannot be found letter by letter.
-    if (req is None or answer not in ("yes", "no")
-            or not hmac.compare_digest(token, req.token)):
-        return page("Invalid link", "This link is not valid.", "#d93025", 400)
-
-    # The link alone is not enough, so a forwarded email is useless.
-    email = auth.current_user(request)
-    if email is None:
-        # We know which account is needed, so Google can sign them in without asking.
-        here = f"/nghiphep/{request_id}/decision?answer={answer}&token={token}"
-        return RedirectResponse(f"/login?next={quote(here)}&hint={quote(req.manager_email)}")
-    if email != req.manager_email:
-        return page("Wrong account",
-                    f"You are signed in as {email}. Sign in with the manager's TDTU account "
-                    "(open /logout first).", "#d93025", 403)
-
-    # Right person, but the server was restarted since they signed in: send them
-    # through Google again (silent) instead of failing after saving the answer.
-    if not auth.has_send_permission(email):
-        here = f"/nghiphep/{request_id}/decision?answer={answer}&token={token}"
-        return RedirectResponse(f"/login?next={quote(here)}&hint={quote(req.manager_email)}")
-
-    if req.status != "PENDING":
-        return page("Already answered",
-                    f"This request was already {req.status.lower()}. Nothing was changed.",
-                    "#5f6368")
-
-    if datetime.now(timezone.utc) - req.created_at > timedelta(hours=DECISION_VALID_HOURS):
-        return page("Link expired", "This request is too old to be answered.", "#f29900", 410)
-
-    updated = store.decide(request_id, answer == "yes")
-    if updated is None:   # two clicks in the same instant
-        return page("Already answered", "This request was already answered.", "#5f6368")
-
-    try:
-        mail.send_result_to_employee(updated, auth.token_for(email))
-    except (mail.MailError, HTTPException) as error:
-        # The answer is saved: say so, instead of inviting another click.
-        return page("Answer saved, email failed",
-                    f"Your answer was saved, but the email to {updated.employee_email} "
-                    f"could not be sent: {getattr(error, 'detail', error)}", "#f29900", 502)
-
-    approved = updated.status == "APPROVED"
-    return page("Request approved" if approved else "Request rejected",
-                f"Thank you. {updated.employee_email} has been notified by email.",
-                "#188038" if approved else "#d93025")
+@app.get("/auth/callback")
+def auth_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
+    if error:
+        raise HTTPException(400, f"Google sign-in failed: {error}")
+    if not code or state != request.session.pop("oauth_state", None):
+        raise HTTPException(400, "Invalid OAuth state, please sign in again")
+    request.session["email"] = oauth.exchange_code(code)
+    return RedirectResponse(request.session.pop("next", "/"))
 
 
-@app.get("/nghiphep")
-def list_absences(request: Request):
-    """Only your own requests: a reason is private."""
-    email = auth.require_user(request)
-    return [as_json(req) for req in store.all_requests()
-            if email in (req.employee_email, req.manager_email)]
+@app.get("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/")
 
 
-@app.get("/nghiphep/{request_id}")
-def get_absence(request_id: int, request: Request):
-    email = auth.require_user(request)
-    req = store.get(request_id)
-    if req is None or email not in (req.employee_email, req.manager_email):
-        raise HTTPException(404, "Absence request not found")   # 404, not 403: reveals nothing
-    return as_json(req)
+# --- Worker: send an absence request ----------------------------------------
+
+@app.post("/requests")
+def create_request(
+    request: Request,
+    manager_email: str = Form(),
+    start_date: str = Form(),
+    end_date: str = Form(),
+    reason: str = Form(),
+):
+    worker = current_user(request)
+    if not worker:
+        return RedirectResponse("/", status_code=303)
+
+    # Random secret per request: the Yes/No links only work with it, so they can't be guessed.
+    token = secrets.token_urlsafe(24)
+    req_id = db.create_request(worker, manager_email.strip().lower(), start_date, end_date, reason, token)
+    req = db.get_request(req_id)
+
+    link = f"{config.BASE_URL}/requests/{req_id}/decide?t={token}&answer="
+    ctx = {"req": req, "yes_url": link + "yes", "no_url": link + "no"}
+
+    message_id = mailer.send_mail(
+        sender=worker,
+        access_token=oauth.access_token_for(worker),
+        to=req["manager_email"],
+        subject=subject_for(req),
+        html=templates.get_template("email_request.html").render(ctx),
+    )
+    db.set_message_id(req_id, message_id)
+    return RedirectResponse("/", status_code=303)
+
+
+# --- Manager: click Yes / No in the email ------------------------------------
+
+@app.get("/requests/{req_id}/decide")
+def decide(request: Request, req_id: int, answer: str, t: str):
+    req = db.get_request(req_id)
+    if req is None or not secrets.compare_digest(req["token"], t) or answer not in ("yes", "no"):
+        raise HTTPException(404, "Request not found")
+
+    # Only the manager the email was sent to may answer: sign them in first if needed.
+    manager = req["manager_email"]
+    if current_user(request) != manager:
+        back_here = f"{request.url.path}?{request.url.query}"
+        return RedirectResponse(f"/login?next={quote(back_here)}&hint={quote(manager)}")
+
+    if req["status"] == "PENDING":
+        status = "APPROVED" if answer == "yes" else "REJECTED"
+        # Reply from the manager's own Gmail, in the same thread as the request.
+        mailer.send_mail(
+            sender=manager,
+            access_token=oauth.access_token_for(manager),
+            to=req["worker_email"],
+            subject="Re: " + subject_for(req),
+            html=templates.get_template("email_reply.html").render(req=req, status=status),
+            in_reply_to=req["message_id"],
+        )
+        db.set_status(req_id, status)
+        req = db.get_request(req_id)
+
+    return templates.TemplateResponse(request, "decided.html", {"req": req})

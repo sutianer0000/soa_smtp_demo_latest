@@ -1,15 +1,3 @@
-# secrets - never commit or share these
 .env
-login_client.json
-credentials.json
-client_secret*.json
-token.json
-
-# real names and emails; copy approved.example.json instead
-approved.json
-
-# generated / local
 .venv/
 __pycache__/
-.pytest_cache/
-.vscode/

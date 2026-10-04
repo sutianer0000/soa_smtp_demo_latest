@@ -1,0 +1,15 @@
+<div style="font-family: Arial, sans-serif; max-width: 520px; color: #222;">
+  <h2 style="margin: 0 0 12px;">Absence request</h2>
+  <p><b>{{ req.worker_email }}</b> is requesting leave:</p>
+  <table cellpadding="6" style="border-collapse: collapse;">
+    <tr><td><b>From</b></td><td>{{ req.start_date }}</td></tr>
+    <tr><td><b>To</b></td><td>{{ req.end_date }}</td></tr>
+    <tr><td><b>Reason</b></td><td>{{ req.reason }}</td></tr>
+  </table>
+  <p>Do you approve this request?</p>
+  <a href="{{ yes_url }}" style="display: inline-block; padding: 10px 32px; background: #1e8e3e; color: #fff;
+     text-decoration: none; border-radius: 4px; font-weight: bold;">Yes</a>
+  &nbsp;
+  <a href="{{ no_url }}" style="display: inline-block; padding: 10px 32px; background: #d93025; color: #fff;
+     text-decoration: none; border-radius: 4px; font-weight: bold;">No</a>
+</div>

@@ -1,0 +1,5 @@
+<div style="font-family: Arial, sans-serif; max-width: 520px; color: #222;">
+  <p>Your absence request from <b>{{ req.start_date }}</b> to <b>{{ req.end_date }}</b> has been
+    <b style="color: {{ '#1e8e3e' if status == 'APPROVED' else '#d93025' }};">{{ status }}</b>
+    by {{ req.manager_email }}.</p>
+</div>

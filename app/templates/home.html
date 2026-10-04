@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+  <h3>New absence request (worker)</h3>
+  <form class="card" method="post" action="/requests">
+    <label>Manager's email <input type="email" name="manager_email" required></label>
+    <label>From <input type="date" name="start_date" required></label>
+    <label>To <input type="date" name="end_date" required></label>
+    <label>Reason <textarea name="reason" rows="3" required></textarea></label>
+    <button type="submit">Send via Gmail</button>
+  </form>
+
+  <h3>Requests I sent</h3>
+  <table>
+    <tr><th>#</th><th>To</th><th>Dates</th><th>Status</th></tr>
+    {% for r in sent %}
+      <tr><td>{{ r.id }}</td><td>{{ r.manager_email }}</td>
+          <td>{{ r.start_date }} → {{ r.end_date }}</td><td class="{{ r.status }}">{{ r.status }}</td></tr>
+    {% else %}
+      <tr><td colspan="4">None yet.</td></tr>
+    {% endfor %}
+  </table>
+{% endblock %}

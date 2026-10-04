@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+  <h3>Requests waiting for your decision</h3>
+  <table>
+    <tr><th>#</th><th>From</th><th>Dates</th><th>Reason</th></tr>
+    {% for r in waiting %}
+      <tr><td>{{ r.id }}</td><td>{{ r.worker_email }}</td>
+          <td>{{ r.start_date }} → {{ r.end_date }}</td><td>{{ r.reason }}</td></tr>
+    {% else %}
+      <tr><td colspan="4">Nothing waiting.</td></tr>
+    {% endfor %}
+  </table>
+  <p>Answer each request with the Yes/No buttons in the email sent to your Gmail.</p>
+{% endblock %}
