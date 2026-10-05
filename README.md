@@ -1,23 +1,21 @@
 # Gmail SMTP + OAuth 2.0: Absence Request Demo
 
-A small FastAPI web app that helps autom
+A small FastAPI web app that helps automate the process of sending email for absense
 
+**workflow**
 - A **worker** signs in with Google and submits a leave request.
 - The app emails the **manager** from the worker's Gmail, through Gmail SMTP.
 - The manager clicks **Yes** or **No** in the email.
-- The app replies to the worker **from the manager's Gmail**, in the same thread.
+- The app replies to the worker **from the manager's Gmail**, in the same email thread(reply).
 
-Login to Gmail SMTP uses an **OAuth 2.0 access token** (SASL `XOAUTH2`) instead of a password.
+Login to Gmail SMTP uses an **OAuth 2.0 access token** (SASL `XOAUTH2`)
 
 ---
 
 ## 1. Requirements
 
 - Python **3.10+**
-- Two Google accounts for the demo: one **worker**, one **manager**.
-  - With **Internal** audience (step 2.3), both must belong to the same Google Workspace organization (e.g. `@student.tdtu.edu.vn`).
-  - With **External** audience, any Gmail accounts listed as test users.
-- Two browser profiles (or one normal window plus one incognito window), so both users can be signed in at the same time.
+- Two Google accounts for the demo: one **worker**, one **manager**. See **Accounts** in [Constraints](#6-constraints-and-limitations).
 
 ---
 
@@ -75,11 +73,13 @@ Open the project folder in your editor (e.g. VS Code) and use its terminal.
 ### 3.1 Create a virtual environment and install packages
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+source .venv/bin/activate      
+
+# Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 3.2 Create the `.env` file
+### 3.2 Create the `.env` file or just rename it to .env
 ```bash
 cp .env.example .env
 ```
@@ -89,7 +89,7 @@ GOOGLE_CLIENT_ID=<Client ID from step 2.4>
 GOOGLE_CLIENT_SECRET=<Client Secret from step 2.4>
 SESSION_SECRET=<random string, see below>
 BASE_URL=http://localhost:8002
-MANAGER_EMAILS=manager@student.tdtu.edu.vn
+MANAGER_EMAILS=manager@student.tdtu.edu.vn (choose 1 as the manager's email)
 ```
 - **`SESSION_SECRET`** signs the login cookie. Generate one with:
   ```bash
@@ -112,14 +112,19 @@ Avoid `--reload` while demoing. Every code change restarts the server, and in-me
 
 ## 4. Running the demo
 
-| Step | Browser | What to do | What happens |
+The whole demo runs in **one browser**. Do the worker's part (A) first, then sign out of the app and continue as the manager (B).
+
+| Step | Account | What to do | What happens |
 |---|---|---|---|
 | 1 | A (worker) | Open `localhost:8002` → **Sign in with Google** → choose the worker account → **Allow** | OAuth sign-in; the app now holds the worker's token |
 | 2 | A | Fill in the leave form (manager's email, dates, reason) → **Send via Gmail** | The request email is sent **from the worker's Gmail** |
-| 3 | B (manager) | Open the manager's Gmail | The email arrived, with **Yes / No** buttons |
-| 4 | B | Click **Yes** (or **No**) → sign in with the manager account if asked | The decision is recorded and the reply is sent **from the manager's Gmail** |
-| 5 | B | Open `localhost:8002` | Manager page: requests still waiting (now empty) |
-| 6 | A | Open the worker's Gmail | The "Re: Absence request…" reply sits in the **same thread** |
+| 3 | – | Click **Sign out** in the app | The app no longer treats the browser as A |
+| 4 | B (manager) | Open the manager's Gmail mailbox and the request email | The email arrived, with **Yes / No** buttons |
+| 5 | B | Click **Yes** (or **No**) → **Sign in with Google** as the manager → **Allow** | The decision is recorded and the reply is sent **from the manager's Gmail** |
+| 6 | B | Open `localhost:8002` | Manager page: requests still waiting (now empty) |
+| 7 | A | Switch to the worker's Gmail mailbox | The "Re: Absence request…" reply sits in the **same thread** |
+
+**Gmail mailboxes vs. app sign-in:** both Gmail accounts can stay signed in to Google in the same browser, and you can switch between the two mailboxes (profile picture → choose account). Every email displays normally in either mailbox. But the **Yes / No buttons only work when you are signed in to the app as that manager**. If the app session belongs to the worker, or to nobody, clicking a button first sends you to **Sign in with Google**, where you must choose the manager account.
 
 ---
 
@@ -151,27 +156,14 @@ app/
 
 ## 6. Constraints and limitations
 
-This is a **teaching demo**, not production software.
+This is a **demo**, not production software.
+
+**Accounts**
+- **Built for two internal TDTU accounts.** The demo uses the **Internal** audience: only the two `@student.tdtu.edu.vn` accounts (worker and manager) in the TDTU organization can sign in.
+- **External accounts need test users.** The app can be reconfigured with the **External** audience, but then every Gmail account that signs in must be listed under **Test users**.
+- **Student email is TDTU-only.** `@student.tdtu.edu.vn` accounts cannot send to or receive from external addresses (e.g. `@gmail.com`), so the worker and manager must both be TDTU accounts, or both be external accounts.
 
 **Storage and runtime**
 - **In-memory storage only.** Users, tokens and requests live in Python dictionaries, so stopping or restarting the server (including `--reload`) erases everything. Users must sign in again, and Yes/No links in old emails return 404.
 - **Single process only.** Running multiple workers (`--workers N`) breaks the app, because each process has its own memory.
 - **Runs on `localhost` over HTTP.** The Yes/No links point to `localhost:8002`, so they only work on the machine running the app. Using another device or a real deployment needs a public **HTTPS** URL, a matching `BASE_URL`, and that URL registered as a redirect URI.
-
-**Google and Gmail**
-- **Broad Gmail scope.** SMTP requires `https://mail.google.com/` (read, send and delete all mail). The app only sends, but the token technically allows more. The Gmail API with `gmail.send` would be narrower.
-- **No public release without Google review.** `https://mail.google.com/` is a *restricted* scope. Outside Internal or Testing mode, Google requires app verification and a security assessment.
-- **Testing mode tokens expire.** With External + Testing, refresh tokens expire after **7 days**, so users must sign in again.
-- **Organization policies.** A Workspace admin may block third-party apps or restricted scopes. Then sign-in shows "Access blocked".
-- **Gmail sending limits.** About 500 recipients/day for personal accounts and about 2,000 for Workspace. Not suitable for bulk or marketing email.
-
-**Application behaviour**
-- **Manager list is strict.** `MANAGER_EMAILS` is split on commas only, so entries must be lowercase with no spaces.
-- **The recipient isn't checked against the manager list.** A worker can send a request to any address. That person can answer through the email buttons but won't get the manager page.
-- **Decisions are final.** No cancel, edit or undo. Only the first Yes/No click counts.
-- **Minimal validation.** Dates aren't validated (an end date before the start date is accepted).
-- **Minimal error handling.** Google or SMTP errors appear as a raw error page. If sending fails after a request is created, the request stays PENDING with no email sent.
-- **HTML-only emails.** No plain-text alternative part.
-- **No CSRF token on the form.** The `SameSite=Lax` session cookie mitigates this; a production app should add one.
-
-**Security measures that *are* included:** the OAuth `state` check, a signed session cookie (`SESSION_SECRET`), a random token in each Yes/No link compared with `compare_digest`, a check that the signed-in user is the intended manager, STARTTLS before sending the token, and Jinja2 HTML auto-escaping.
