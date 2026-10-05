@@ -48,7 +48,6 @@ def login(request: Request, next: str = "/", hint: str | None = None):
     # Only local paths, so /login can't be abused as an open redirect.
     request.session["next"] = next if next.startswith("/") and not next.startswith("//") else "/"
     return RedirectResponse(oauth.authorization_url(state, hint))
-#https://accounts.google.com/o/oauth2/v2/auth?client_id=433628379878-nje0e4smj3t62kt9q3s6so7rjkp72erv.apps.googleusercontent.com&redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fauth%2Fcallback&response_type=code&scope=openid+email+https%3A%2F%2Fmail.google.com%2F&access_type=offline&prompt=consent+select_account&state=pX3kQ9vT_2mLr8YwZ1aB0g
 
 
 @app.get("/auth/callback")
