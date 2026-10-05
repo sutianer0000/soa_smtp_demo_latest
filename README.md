@@ -26,7 +26,11 @@ At <https://console.cloud.google.com>:
 4. **Clients → Create client:**
    - type **Web application**,
    - redirect URI `http://localhost:8002/auth/callback`,
-   - Create, then copy the **Client ID** and **Client Secret**.
+   - Create, then **Download JSON**. The downloaded `client_secret_….json` file holds both values under `"web"`:
+     ```json
+     {"web": {"client_id": "xxxx.apps.googleusercontent.com", "client_secret": "GOCSPX-xxxx", ...}}
+     ```
+     Copy `client_id` → `GOOGLE_CLIENT_ID` and `client_secret` → `GOOGLE_CLIENT_SECRET` in `.env` (step 3). Keep the JSON file out of the project folder, and never commit it.
 
 ## 3. Run
 
