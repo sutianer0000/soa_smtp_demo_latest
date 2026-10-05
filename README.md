@@ -4,6 +4,8 @@ A small FastAPI app where a **worker** sends a leave request from their own Gmai
 
 **Why:** the app sends email **as the user** through Gmail SMTP **without ever knowing their password**. The user approves on Google's page, and the app logs in to SMTP with a limited **OAuth 2.0 token** (`XOAUTH2`).
 
+**Slides:** [slide.pdf](slide.pdf)
+
 ---
 
 ## 1. Get the code
